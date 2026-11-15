@@ -9,13 +9,14 @@ import * as vscode from 'vscode';
 import type { TestApi } from '../../../src/extension';
 import {
   delay,
+  emptyFolder,
   getApi,
   openInEditor,
   removeExternally,
   uriOf,
   waitFor,
   writeExternally,
-} from './helpers';
+} from '../helpers';
 
 /** Long enough for a watcher event and the delete-confirmation debounce to settle. */
 const SETTLE_MS = 1000;
@@ -35,7 +36,7 @@ suite('File First Look', () => {
   setup(async () => {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     await api.stop();
-    await removeExternally('scratch');
+    await emptyFolder('scratch');
     await delay(SETTLE_MS);
     await vscode.commands.executeCommand('fileFirstLook.startTracking');
     await api.idle();
@@ -44,7 +45,7 @@ suite('File First Look', () => {
   suiteTeardown(async () => {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     await api.stop();
-    await removeExternally('scratch');
+    await emptyFolder('scratch');
   });
 
   suite('starting', () => {
@@ -169,6 +170,32 @@ suite('File First Look', () => {
       await waitFor(() => isPending('scratch/doomed.ts'), 'file listed');
       await removeExternally('scratch/doomed.ts');
       await waitFor(() => !isPending('scratch/doomed.ts'), 'deleted file removed');
+    });
+
+    test('does not re-list a file you opened when it is deleted and comes back', async () => {
+      // What a branch switch away and back, or git stash/pop, looks like on disk.
+      await writeExternally('scratch/roundtrip.ts');
+      await openInEditor('scratch/roundtrip.ts');
+      await waitFor(() => isOpened('scratch/roundtrip.ts'), 'file marked opened');
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
+      await removeExternally('scratch/roundtrip.ts');
+      await delay(SETTLE_MS);
+      await writeExternally('scratch/roundtrip.ts', '// restored\n');
+      await delay(SETTLE_MS);
+      assert.equal(isPending('scratch/roundtrip.ts'), false);
+    });
+
+    test('un-ignoring files via .gitignore does not flood the list', async () => {
+      await writeExternally('scratch/.gitignore', 'hidden/\n');
+      await writeExternally('scratch/hidden/old.ts');
+      await waitFor(() => isPending('scratch/.gitignore'), 'rules file listed');
+      await delay(SETTLE_MS);
+      assert.equal(isPending('scratch/hidden/old.ts'), false, 'ignored while the rule exists');
+
+      await removeExternally('scratch/.gitignore');
+      await waitFor(() => api.state().baseline.has('scratch/hidden/old.ts'), 'rescope ran');
+      assert.equal(isPending('scratch/hidden/old.ts'), false, 'joins the baseline, not the list');
     });
 
     test('keeps opened status when a file is renamed inside VS Code', async () => {

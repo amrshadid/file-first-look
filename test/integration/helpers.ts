@@ -3,7 +3,7 @@ import * as path from 'node:path';
 
 import * as vscode from 'vscode';
 
-import type { TestApi } from '../../../src/extension';
+import type { TestApi } from '../../src/extension';
 
 export const EXTENSION_ID = 'file-first-look.file-first-look';
 
@@ -41,8 +41,24 @@ export async function writeExternally(rel: string, content = '// generated\n'): 
   await fs.writeFile(target, content);
 }
 
+/**
+ * Windows briefly locks files and folders that VS Code is watching or has open,
+ * so deletes retry on EBUSY/EPERM instead of failing the test.
+ */
+const RM_OPTIONS = { recursive: true, force: true, maxRetries: 10, retryDelay: 200 } as const;
+
 export async function removeExternally(rel: string): Promise<void> {
-  await fs.rm(path.join(folderUri().fsPath, rel), { recursive: true, force: true });
+  await fs.rm(path.join(folderUri().fsPath, rel), RM_OPTIONS);
+}
+
+/**
+ * Empties a folder but keeps the folder itself. Removing a watched folder on
+ * Windows can fail with EBUSY even after retries; its contents can be removed.
+ */
+export async function emptyFolder(rel: string): Promise<void> {
+  const dir = path.join(folderUri().fsPath, rel);
+  const entries = await fs.readdir(dir).catch(() => [] as string[]);
+  await Promise.all(entries.map((entry) => fs.rm(path.join(dir, entry), RM_OPTIONS)));
 }
 
 export async function openInEditor(rel: string): Promise<void> {

@@ -1,9 +1,10 @@
 // @ts-check
 import eslint from '@eslint/js';
 import prettier from 'eslint-config-prettier';
+import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
-export default tseslint.config(
+export default defineConfig(
   { ignores: ['dist/', 'out/', 'coverage/', '.vscode-test/', 'node_modules/', 'test/fixtures/'] },
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
@@ -11,7 +12,9 @@ export default tseslint.config(
   {
     languageOptions: {
       parserOptions: {
-        projectService: { allowDefaultProject: ['*.mjs', '.vscode-test.mjs'] },
+        projectService: {
+          allowDefaultProject: ['*.mjs', '.vscode-test.mjs', 'test/integration/restart/*.mjs'],
+        },
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -43,7 +46,8 @@ export default tseslint.config(
   {
     files: ['**/*.mjs', '**/*.js'],
     ...tseslint.configs.disableTypeChecked,
-    languageOptions: { globals: { process: 'readonly' } },
+    languageOptions: { globals: { process: 'readonly', URL: 'readonly', console: 'readonly' } },
+    rules: { 'no-console': 'off' },
   },
   {
     files: ['test/**/*.ts'],
