@@ -18,7 +18,7 @@ src/
 │   ├── workspaceScanner.ts  Full scans (git or findFiles)
 │   ├── fileWatcher.ts       Create/delete events → core events
 │   ├── visitTracker.ts      Active tab + focus + dwell time → "visited"
-│   ├── stateStore.ts        workspaceState persistence
+│   ├── stateStore.ts        Crash-safe JSON files in VS Code's private storage
 │   ├── unopenedFilesView.ts Tree view, badge, description
 │   └── uris.ts              URI → workspace-relative path
 └── extension.ts             Composition root: wiring and commands
@@ -32,9 +32,14 @@ The state holds three disjoint sets of workspace-relative paths:
 
 | Set        | Meaning                                                                              |
 | ---------- | ------------------------------------------------------------------------------------ |
-| `baseline` | Existed when tracking started, or came into scope when exclusions changed.           |
+| `baseline` | Existed when tracking started, or came into scope when the scope changed.            |
 | `pending`  | Appeared after tracking started and hasn't been opened. This is what the view shows. |
 | `opened`   | Appeared after tracking started and has been opened.                                 |
+
+`baseline` and `opened` are the paths you already know. They are remembered for the
+whole tracking session, even after a file is deleted. A branch switch, `git stash` or a
+regenerate-on-build tool removes files and later restores them, and a path you have
+already seen must never come back as "new".
 
 All changes go through one pure function, `reduce(state, event)`. It is idempotent, and
 it returns the same object when nothing changed, so callers can skip saving and
@@ -45,10 +50,10 @@ re-rendering.
 | `started`      | All present files become the baseline.                                                          |
 | `created`      | An unknown path becomes pending.                                                                |
 | `visited`      | Pending → opened. An unknown path goes straight to opened, so a late watcher event is harmless. |
-| `deleted`      | Removes the path and everything beneath it (folder deletes can arrive as one event).            |
+| `deleted`      | Batched. Drops pending rows at or under the paths (folder deletes can arrive as one event).     |
 | `renamed`      | Moves membership to the new path, including descendants.                                        |
-| `reconciled`   | Rescan: unknown present files become pending; missing files are dropped.                        |
-| `scopeChanged` | Rescan after a settings change: newly in-scope files join the baseline, not the list.           |
+| `reconciled`   | Rescan: unknown present files become pending; pending rows for missing files are dropped.       |
+| `scopeChanged` | Rescan after a scope change: newly in-scope files join the baseline, not the list.              |
 | `markedOpened` | Manual pending → opened.                                                                        |
 
 ## Event flow
@@ -77,16 +82,28 @@ applied after the baseline and are never lost or double-counted.
 - **The tab API, not `activeTextEditor`.** In a diff editor the modified side is a real
   file document, so `activeTextEditor` would count diffs as opens. The active tab's
   input type tells them apart, and it also covers images and notebooks.
+- **Scope changes never flood the list.** The exclusions, the git-ignore setting and
+  workspace trust define the scope. The scope is stored with the state, and `.gitignore`
+  files are watched. Whenever the scope changes, even while VS Code was closed, the
+  rescan adds newly visible files to the baseline instead of the list.
+- **Files, not `workspaceState`, for persistence.** VS Code flushes `workspaceState` to
+  disk only periodically or on a clean shutdown, so a crash could lose recent changes.
+  State lives in JSON files in VS Code's private per-workspace storage folder. Each write
+  goes to a temp file first and is then renamed.
 - **git for ignore rules.** `.gitignore` semantics (nesting, negation, global excludes)
   are easy to get wrong. `git ls-files` and `git check-ignore` are authoritative, and
-  they're faster on large repositories.
+  they're faster on large repositories. git never runs in an untrusted workspace, always
+  runs with `core.fsmonitor` disabled, and on Windows is launched by absolute path.
 
 ## Performance
 
 - The reducer copies a set only when it changes. Events that don't touch the
   potentially huge baseline cost O(1) for it (covered by a regression test).
-- The baseline is persisted under its own key and rewritten only when it changes. The
+- The baseline is persisted in its own file and rewritten only when it changes. The
   small pending/opened record is written once per burst (250 ms debounce).
+- Deletes are batched (300 ms) into one event. They only touch the small pending set,
+  so `rm -rf dist` with 10k files against a 100k-file baseline takes milliseconds
+  (covered by a regression test). Deletes of excluded paths are dropped immediately.
 - The watcher exists only while tracking and ignores content changes.
 - Watcher creates are batched (100 ms) into one `git check-ignore` call.
 

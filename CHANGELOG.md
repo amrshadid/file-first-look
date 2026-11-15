@@ -15,3 +15,15 @@ All notable changes to this project are documented here. The format follows
 - `.gitignore` support through `git ls-files` / `git check-ignore` (`respectGitIgnore`).
 - Configurable exclusions (`exclude`), with defaults for dependencies, build output and caches.
 - Commands: Start Tracking, Stop Tracking, Refresh, Mark as Opened, Mark All as Opened.
+- Files you've already seen never come back as new after a branch switch, `git stash` or a rebuild.
+- Scope changes (exclusions, `.gitignore` edits, workspace trust) never mark existing files as new, even when they happen while VS Code is closed.
+- Version-control folders (`.git`, `.hg`, `.svn`) are always excluded.
+
+### Security
+
+- git is not run in untrusted workspaces, runs with `core.fsmonitor` disabled, and is launched by absolute path on Windows.
+
+### Performance
+
+- Deletes are batched and never touch the baseline, so large delete bursts stay fast in big repositories.
+- State is saved to crash-safe files, and the baseline is written only when it changes.

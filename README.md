@@ -36,7 +36,8 @@ earlier, simpler question:
    it leaves the list. No checkbox, no extra click.
 
 Commits, branch work and restarts don't reset the list. Files added while VS Code was
-closed show up the next time you open the project.
+closed show up the next time you open the project. A file you've already seen never
+comes back as new, even if a branch switch removes it and brings it back.
 
 ### What counts as "opened"
 
@@ -85,7 +86,8 @@ The extension is built to stay out of the way in large repositories:
 
 - One scan when you start tracking. With git it's `git ls-files`, so ignored folders are never walked.
 - No work while tracking is off. While on, it watches only for created and deleted files, never content changes.
-- Bursts of agent-created files are batched, and saved state is written once per burst.
+- Bursts are batched: hundreds of agent-created files means one git check, and `rm -rf dist` means one update.
+- Tested against a 100k-file baseline: a 10k-file delete burst is handled in milliseconds.
 
 ## Limitations
 
@@ -95,7 +97,11 @@ These are deliberate scope choices for the first release:
 - Tracking starts when you start it. It can't know which existing files you read before.
 - Switching to a branch with files you've never seen lists those files as new.
 - Files moved outside VS Code look like new files. Renames inside VS Code keep their status.
+  On macOS and Windows, a case-only rename outside VS Code (`readme.md` → `README.md`) is listed as new.
 - An agent working in a separate worktree is invisible until its files land in your folder.
+- Files inside git submodules are not tracked.
+- Use one VS Code window per folder. Two windows on the same folder keep separate, competing state.
+- In an untrusted workspace, `.gitignore` is not applied until you trust the folder, because git isn't run there.
 
 ## How it compares
 
