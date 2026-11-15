@@ -250,6 +250,7 @@
     "esbuild": "0.28.2",
     "eslint": "10.15.0",
     "eslint-config-prettier": "10.1.8",
+    "ovsx": "1.4.0",
     "prettier": "3.10.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.72.2",
