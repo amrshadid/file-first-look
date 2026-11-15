@@ -33,13 +33,12 @@ export class UnopenedFilesView implements vscode.TreeDataProvider<RelPath>, vsco
   update(state: TrackingState): void {
     this.items = [...state.pending].sort((a, b) => a.localeCompare(b));
     const pending = state.pending.size;
-    const total = pending + state.opened.size;
 
     this.treeView.badge =
       pending > 0
         ? { value: pending, tooltip: `${pending} new ${plural(pending, 'file')} not opened yet` }
         : undefined;
-    this.treeView.description = state.tracking && total > 0 ? `${pending} of ${total} new` : '';
+    this.treeView.description = state.tracking && pending > 0 ? `${pending} unopened` : '';
     this.changeEmitter.fire(undefined);
   }
 

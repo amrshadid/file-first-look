@@ -54,18 +54,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAp
   let filter: PathFilter = createPathFilter(settings.exclude);
   const getFilter = (): PathFilter => filter;
 
-  // Detected once; `respectGitIgnore` decides whether it is used.
-  const detectedGit = await GitIgnore.detect(folder.uri.fsPath);
+  // Git is never run in an untrusted workspace: a repository's config can make
+  // git execute programs. Until the user trusts the folder, only the exclusion
+  // list applies. `respectGitIgnore` decides whether a detected repo is used.
+  let detectedGit: GitIgnore | undefined;
+  const detectGit = async (): Promise<void> => {
+    detectedGit = vscode.workspace.isTrusted
+      ? await GitIgnore.detect(folder.uri.fsPath)
+      : undefined;
+    log.info(
+      detectedGit
+        ? 'Git repository detected: .gitignore rules apply (fileFirstLook.respectGitIgnore).'
+        : vscode.workspace.isTrusted
+          ? 'No git repository: using the exclusion list only.'
+          : 'Untrusted workspace: git is not used; using the exclusion list only.',
+    );
+  };
+  await detectGit();
   const getGit = (): GitIgnore | undefined => (settings.respectGitIgnore ? detectedGit : undefined);
-  log.info(
-    detectedGit
-      ? 'Git repository detected: .gitignore rules apply (fileFirstLook.respectGitIgnore).'
-      : 'No git repository: using the exclusion list only.',
-  );
 
   // --- Core ---------------------------------------------------------------------
-  store = new StateStore(context.workspaceState);
-  const loaded = store.load();
+  // `storageUri` is VS Code's private folder for this workspace; it always
+  // exists when a folder is open.
+  const storageDir = (context.storageUri ?? context.globalStorageUri).fsPath;
+  store = new StateStore(storageDir, (error) => {
+    log.error(`Could not save state: ${String(error)}`);
+  });
+  const loaded = await store.load();
   if (loaded.problem !== undefined) {
     log.warn(`Discarded stored state: ${loaded.problem}`);
   }
@@ -83,7 +98,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAp
     },
     now: () => Date.now(),
   });
-  context.subscriptions.push(store);
+  context.subscriptions.push({ dispose: () => void store?.flush() });
 
   const reportError = (error: unknown): void => {
     log.error(error instanceof Error ? error : String(error));
@@ -92,13 +107,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAp
     tracker.dispatch(event).catch(reportError);
   };
 
+  // The scope a baseline was taken with. If it changes (settings, trust, git
+  // ignore on/off), rescans must use "scope changed" semantics.
+  const currentScope = (): string =>
+    JSON.stringify({ exclude: settings.exclude, git: getGit() !== undefined });
+  const rememberScope = (): Promise<void> => store?.writeScope(currentScope()) ?? Promise.resolve();
+  const rescope = (): void => {
+    tracker.rescope().then(rememberScope).catch(reportError);
+  };
+
   // --- Adapters -----------------------------------------------------------------
   // The watcher only runs while tracking, so an idle extension costs nothing.
   let watcher: FileWatcher | undefined;
+  const ensureWatcher = (): void => {
+    watcher ??= new FileWatcher(folder, getFilter, scan, getGit, {
+      dispatch,
+      ignoreRulesChanged: () => {
+        log.info('Ignore rules changed: rescanning scope.');
+        rescope();
+      },
+      onError: reportError,
+    });
+  };
   const syncWatcher = (state: TrackingState): void => {
-    if (state.tracking && watcher === undefined) {
-      watcher = new FileWatcher(folder, getFilter, scan, getGit, dispatch, reportError);
-    } else if (!state.tracking && watcher !== undefined) {
+    if (state.tracking) {
+      ensureWatcher();
+    } else if (watcher !== undefined) {
       watcher.dispose();
       watcher = undefined;
     }
@@ -150,17 +184,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<TestAp
       const excludeChanged = JSON.stringify(previous.exclude) !== JSON.stringify(settings.exclude);
       if (excludeChanged || previous.respectGitIgnore !== settings.respectGitIgnore) {
         filter = createPathFilter(settings.exclude);
-        tracker.rescope().catch(reportError);
+        log.info('Exclusion settings changed: rescanning scope.');
+        rescope();
       }
       visits.evaluate();
     }),
   );
 
-  registerCommands(context, folder, tracker, reportError);
+  context.subscriptions.push(
+    vscode.workspace.onDidGrantWorkspaceTrust(() => {
+      // Now that git may run, newly ignored files drop out and nothing floods in.
+      detectGit().then(rescope, reportError);
+    }),
+  );
 
-  // Catch files added while VS Code was closed.
+  registerCommands(context, folder, tracker, reportError, {
+    // Watch *before* the baseline scan: events during the scan queue behind it,
+    // so files created while a large repository is being scanned aren't missed.
+    beforeStart: ensureWatcher,
+    afterStart: rememberScope,
+  });
+
+  // Catch files added while VS Code was closed. If the scope changed meanwhile
+  // (settings edited, Settings Sync, trust), rescan without marking old files new.
   if (tracker.state.tracking) {
-    tracker.reconcile().catch(reportError);
+    if ((await store.readScope()) === currentScope()) {
+      tracker.reconcile().catch(reportError);
+    } else {
+      log.info('Scope changed since last session: rescanning scope.');
+      rescope();
+    }
   }
 
   return {
@@ -179,11 +232,17 @@ export async function deactivate(): Promise<void> {
   await store?.flush();
 }
 
+interface StartHooks {
+  readonly beforeStart: () => void;
+  readonly afterStart: () => Promise<void>;
+}
+
 function registerCommands(
   context: vscode.ExtensionContext,
   folder: vscode.WorkspaceFolder,
   tracker: Tracker,
   reportError: (error: unknown) => void,
+  hooks: StartHooks,
 ): void {
   const withProgress = (title: string, task: () => Promise<void>): Thenable<void> =>
     vscode.window.withProgress(
@@ -202,7 +261,11 @@ function registerCommands(
     ) {
       return;
     }
-    await withProgress('Taking baseline…', () => tracker.start()).then(undefined, reportError);
+    hooks.beforeStart();
+    await withProgress('Taking baseline…', async () => {
+      await tracker.start();
+      await hooks.afterStart();
+    }).then(undefined, reportError);
   });
 
   register('fileFirstLook.stopTracking', async () => {

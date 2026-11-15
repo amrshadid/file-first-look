@@ -39,7 +39,12 @@
   ],
   "capabilities": {
     "untrustedWorkspaces": {
-      "supported": true
+      "supported": "limited",
+      "description": "In untrusted workspaces, git is not run (so .gitignore rules are not applied) and workspace values for the exclusion settings are ignored.",
+      "restrictedConfigurations": [
+        "fileFirstLook.exclude",
+        "fileFirstLook.respectGitIgnore"
+      ]
     },
     "virtualWorkspaces": false
   },
@@ -169,7 +174,6 @@
             "type": "string"
           },
           "default": [
-            "**/.git/**",
             "**/node_modules/**",
             "**/bower_components/**",
             "**/dist/**",
@@ -193,7 +197,7 @@
             "**/*.log",
             "**/*.pyc"
           ],
-          "markdownDescription": "Glob patterns (relative to the workspace folder) for paths that are never listed. Applied to both the initial scan and live file events. Changing this list never marks existing files as new.",
+          "markdownDescription": "Glob patterns (relative to the workspace folder) for paths that are never listed. Applied to both scans and live file events. Version-control folders (`.git`, `.hg`, `.svn`) are always excluded. Changing this list never marks existing files as new.",
           "scope": "resource"
         },
         "fileFirstLook.respectGitIgnore": {

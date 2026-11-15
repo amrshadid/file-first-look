@@ -1,9 +1,20 @@
 import { execFile } from 'node:child_process';
+import { access } from 'node:fs/promises';
+import * as path from 'node:path';
 
 import type { RelPath } from '../core';
+import { canonicalPath } from './uris';
 
 /** Generous cap: `ls-files -z` on a 500k-file repository is ~30 MB. */
 const MAX_BUFFER = 256 * 1024 * 1024;
+
+/**
+ * Settings forced on every git call. A repository's own config can name
+ * programs that git runs while reading the index (`core.fsmonitor`), so a
+ * cloned repo could otherwise execute code just by being opened. We also never
+ * run git in untrusted workspaces (see `extension.ts`); this is defence in depth.
+ */
+const SAFE_CONFIG = ['-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false'];
 
 /**
  * Asks git which files are ignored (ADR 0005).
@@ -15,13 +26,20 @@ const MAX_BUFFER = 256 * 1024 * 1024;
  * because ignored folders such as `node_modules` are skipped entirely.
  */
 export class GitIgnore {
-  private constructor(private readonly cwd: string) {}
+  private constructor(
+    private readonly git: string,
+    private readonly cwd: string,
+  ) {}
 
   /** Returns a helper when `cwd` is inside a git work tree and git is installed. */
   static async detect(cwd: string): Promise<GitIgnore | undefined> {
+    const git = await resolveGitExecutable();
+    if (git === undefined) {
+      return undefined;
+    }
     try {
-      const out = await run(cwd, ['rev-parse', '--is-inside-work-tree']);
-      return out.trim() === 'true' ? new GitIgnore(cwd) : undefined;
+      const out = await run(git, cwd, ['rev-parse', '--is-inside-work-tree']);
+      return out.trim() === 'true' ? new GitIgnore(git, cwd) : undefined;
     } catch {
       return undefined;
     }
@@ -36,22 +54,39 @@ export class GitIgnore {
   async listFiles(subdir?: RelPath): Promise<RelPath[]> {
     const pathspec = subdir === undefined ? [] : ['--', subdir];
     const [all, deleted] = await Promise.all([
-      run(this.cwd, ['ls-files', '-z', '--cached', '--others', '--exclude-standard', ...pathspec]),
-      run(this.cwd, ['ls-files', '-z', '--deleted', ...pathspec]),
+      run(this.git, this.cwd, [
+        'ls-files',
+        '-z',
+        '--cached',
+        '--others',
+        '--exclude-standard',
+        ...pathspec,
+      ]),
+      run(this.git, this.cwd, ['ls-files', '-z', '--deleted', ...pathspec]),
     ]);
-    const gone = new Set(splitNul(deleted));
+    const gone = new Set(splitNul(deleted).map((path) => canonicalPath(path)));
     // `--cached` lists a path once per merge stage during conflicts; dedupe.
-    return [...new Set(splitNul(all))].filter((path) => !gone.has(path));
+    const listed = new Set(splitNul(all).map((path) => canonicalPath(path)));
+    return [...listed].filter((path) => !gone.has(path));
   }
 
-  /** Returns the subset of `paths` that git does *not* ignore. One process per batch. */
+  /**
+   * Returns the subset of `paths` that git does *not* ignore. One process per batch.
+   * Throws if git fails (e.g. a path inside a submodule). Callers should fail
+   * open and keep the paths rather than lose them.
+   */
   async withoutIgnored(paths: readonly RelPath[]): Promise<RelPath[]> {
     if (paths.length === 0) {
       return [];
     }
     let ignoredOut: string;
     try {
-      ignoredOut = await run(this.cwd, ['check-ignore', '-z', '--stdin'], paths.join('\0'));
+      ignoredOut = await run(
+        this.git,
+        this.cwd,
+        ['check-ignore', '-z', '--stdin'],
+        paths.join('\0'),
+      );
     } catch (error) {
       // Exit code 1 means "none of these are ignored", which is not a failure.
       if (isExitCode(error, 1)) {
@@ -59,16 +94,41 @@ export class GitIgnore {
       }
       throw error;
     }
-    const ignored = new Set(splitNul(ignoredOut));
+    const ignored = new Set(splitNul(ignoredOut).map((path) => canonicalPath(path)));
     return paths.filter((path) => !ignored.has(path));
   }
 }
 
-function run(cwd: string, args: readonly string[], stdin?: string): Promise<string> {
+/**
+ * Finds the git executable. On Windows, launching a bare `git` searches the
+ * current directory (the workspace) before PATH, so a `git.exe` planted in a
+ * repository would run instead. Resolving an absolute path from PATH avoids
+ * that. Elsewhere, PATH lookup never includes the working directory implicitly.
+ */
+async function resolveGitExecutable(): Promise<string | undefined> {
+  if (process.platform !== 'win32') {
+    return 'git';
+  }
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    if (!path.isAbsolute(dir)) {
+      continue; // Relative entries resolve against the workspace: unsafe.
+    }
+    const candidate = path.join(dir, 'git.exe');
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      // Not in this directory.
+    }
+  }
+  return undefined;
+}
+
+function run(git: string, cwd: string, args: readonly string[], stdin?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(
-      'git',
-      args,
+      git,
+      [...SAFE_CONFIG, ...args],
       { cwd, maxBuffer: MAX_BUFFER, encoding: 'utf8', windowsHide: true },
       (error, stdout) => {
         if (error) {
