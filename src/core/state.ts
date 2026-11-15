@@ -1,12 +1,20 @@
-import { isSameOrDescendant, rebase, type RelPath } from './paths';
+import { ancestorsOf, rebase, type RelPath } from './paths';
 
 /**
  * The complete tracking state (ADR 0002).
  *
  * `baseline`, `pending` and `opened` are always disjoint:
- * - `baseline`: existed when tracking started (or entered scope via a settings change).
+ * - `baseline`: seen before tracking started (or entered scope via a settings change).
  * - `pending`: appeared after tracking started and has not been opened yet.
+ *   This is the only set the user sees, and it only holds files that exist.
  * - `opened`: appeared after tracking started and has been opened at least once.
+ *
+ * `baseline` and `opened` are the paths the user already *knows*. They are
+ * remembered for the whole tracking session, even after a file is deleted. A
+ * branch switch, `git stash` or a regenerate-on-build tool removes and later
+ * restores files, and a path the user has already seen must never come back
+ * as "new". Forgetting known paths would refill the list on every branch
+ * round trip.
  */
 export interface TrackingState {
   readonly tracking: boolean;
@@ -25,8 +33,8 @@ export type TrackingEvent =
   | { readonly type: 'stopped' }
   /** A file appeared on disk. */
   | { readonly type: 'created'; readonly path: RelPath }
-  /** A file or folder disappeared; descendants go with it. */
-  | { readonly type: 'deleted'; readonly path: RelPath }
+  /** Files or folders disappeared (batched); pending rows under them go away. */
+  | { readonly type: 'deleted'; readonly paths: readonly RelPath[] }
   /** A file or folder was renamed inside VS Code; membership moves with it. */
   | { readonly type: 'renamed'; readonly from: RelPath; readonly to: RelPath }
   /** A human looked at a file (see ADR 0003 for what counts). */
@@ -36,8 +44,8 @@ export type TrackingEvent =
   /** A full rescan, e.g. after a restart; catches files added while closed. */
   | { readonly type: 'reconciled'; readonly present: readonly RelPath[] }
   /**
-   * A full rescan after the exclusion settings changed. Newly in-scope paths
-   * join the baseline, never the pending list.
+   * A full rescan after the scope changed (exclusions, .gitignore, trust).
+   * Newly in-scope paths join the baseline, never the pending list.
    */
   | { readonly type: 'scopeChanged'; readonly present: readonly RelPath[] };
 
@@ -90,7 +98,7 @@ export function reduce(state: TrackingState, event: TrackingEvent): TrackingStat
       break;
 
     case 'deleted':
-      draft.removeSubtree(event.path);
+      draft.removePendingUnder(event.paths);
       break;
 
     case 'renamed':
@@ -123,18 +131,19 @@ export function reduce(state: TrackingState, event: TrackingEvent): TrackingStat
   return draft.result();
 }
 
+type SetName = 'baseline' | 'pending' | 'opened';
+const SET_NAMES: readonly SetName[] = ['baseline', 'pending', 'opened'];
+
 /**
  * Copy-on-write helper so the reducer can use plain set operations while still
  * returning the original object when nothing changed.
  *
  * Sets are cloned lazily, on first write only. In a large repository the
- * baseline can hold 100k+ paths, and most events (a file created or visited)
- * never touch it. Leaving it unshared would mean an O(n) copy per event. An
- * untouched set keeps its identity, which also lets the store skip re-writing it.
+ * baseline can hold 100k+ paths, and most events never touch it: creates,
+ * visits and deletes only change `pending`/`opened`. Leaving it unshared avoids
+ * an O(n) copy per event, and an untouched set keeps its identity, which also
+ * lets the store skip re-writing it.
  */
-type SetName = 'baseline' | 'pending' | 'opened';
-const SET_NAMES: readonly SetName[] = ['baseline', 'pending', 'opened'];
-
 class Draft {
   private readonly copies: Partial<Record<SetName, Set<RelPath>>> = {};
 
@@ -173,36 +182,35 @@ class Draft {
     this.write(name).add(path);
   }
 
-  removeSubtree(root: RelPath): void {
-    // Fast path: an exact match is a file, and files have no descendants.
-    let removedExact = false;
-    for (const name of SET_NAMES) {
-      if (this.read(name).has(root)) {
-        this.write(name).delete(root);
-        removedExact = true;
-      }
-    }
-    if (removedExact) {
+  /**
+   * Drops pending rows that are, or live under, any of `roots` (a folder delete
+   * can arrive as one event). Cost is O(pending × depth) for the whole batch,
+   * independent of the baseline size, so `rm -rf dist` with 10k files is cheap.
+   */
+  removePendingUnder(roots: readonly RelPath[]): void {
+    if (roots.length === 0 || this.read('pending').size === 0) {
       return;
     }
-    // Otherwise `root` may be a folder deleted with a single event.
-    for (const name of SET_NAMES) {
-      const doomed = [...this.read(name)].filter((path) => isSameOrDescendant(path, root));
-      if (doomed.length > 0) {
-        const set = this.write(name);
-        for (const path of doomed) {
-          set.delete(path);
-        }
+    const rootSet = new Set(roots);
+    const doomed = [...this.read('pending')].filter(
+      (path) => rootSet.has(path) || ancestorsOf(path).some((dir) => rootSet.has(dir)),
+    );
+    if (doomed.length > 0) {
+      const pending = this.write('pending');
+      for (const path of doomed) {
+        pending.delete(path);
       }
     }
   }
 
+  /**
+   * Moves membership from `from` to `to`, including descendants. O(n) over all
+   * sets, which is fine: this only runs for renames done by the user inside VS Code.
+   */
   moveSubtree(from: RelPath, to: RelPath): void {
     if (from === to) {
       return;
     }
-    // A rename onto an existing path replaces it, so clear the destination first.
-    this.removeSubtree(to);
     for (const name of SET_NAMES) {
       const moved: [RelPath, RelPath][] = [];
       for (const path of this.read(name)) {
@@ -212,6 +220,14 @@ class Draft {
         }
       }
       if (moved.length > 0) {
+        // A rename onto an existing path replaces it in every set.
+        for (const [, next] of moved) {
+          for (const other of SET_NAMES) {
+            if (this.read(other).has(next)) {
+              this.write(other).delete(next);
+            }
+          }
+        }
         const set = this.write(name);
         for (const [old] of moved) {
           set.delete(old);
@@ -223,16 +239,18 @@ class Draft {
     }
   }
 
-  /** Drops known paths that are not present and adds unknown present paths to `target`. */
+  /**
+   * Applies a full scan: pending rows for files that no longer exist (or left
+   * scope) are dropped, and unknown present files are added to `target`. Known
+   * paths are kept even when absent (see {@link TrackingState}).
+   */
   syncWith(present: readonly RelPath[], target: 'pending' | 'baseline'): void {
     const presentSet = new Set(present);
-    for (const name of SET_NAMES) {
-      const missing = [...this.read(name)].filter((path) => !presentSet.has(path));
-      if (missing.length > 0) {
-        const set = this.write(name);
-        for (const path of missing) {
-          set.delete(path);
-        }
+    const missing = [...this.read('pending')].filter((path) => !presentSet.has(path));
+    if (missing.length > 0) {
+      const pending = this.write('pending');
+      for (const path of missing) {
+        pending.delete(path);
       }
     }
     for (const path of presentSet) {

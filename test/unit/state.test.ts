@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { initialState, isKnown, reduce } from '../../src/core';
+import { initialState, reduce } from '../../src/core';
 import { run, sorted } from './helpers';
 
 describe('reduce', () => {
@@ -97,30 +97,58 @@ describe('reduce', () => {
   });
 
   describe('deleted', () => {
-    it('removes a file from every set', () => {
-      const state = run(['a.ts'], { type: 'deleted', path: 'a.ts' });
-      expect(isKnown(state, 'a.ts')).toBe(false);
+    it('removes a deleted pending file from the list', () => {
+      const state = run(
+        [],
+        { type: 'created', path: 'p.ts' },
+        { type: 'deleted', paths: ['p.ts'] },
+      );
+      expect(state.pending.size).toBe(0);
     });
 
-    it('removes all descendants when a folder is deleted with a single event', () => {
+    it('removes every pending file under a folder deleted with a single event', () => {
       const state = run(
-        ['keep.ts', 'gen/old.ts'],
+        [],
         { type: 'created', path: 'gen/a.ts' },
         { type: 'created', path: 'gen/sub/b.ts' },
         { type: 'created', path: 'generated.ts' },
-        { type: 'deleted', path: 'gen' },
+        { type: 'deleted', paths: ['gen'] },
       );
-      expect(sorted(state.baseline)).toEqual(['keep.ts']);
       expect(sorted(state.pending)).toEqual(['generated.ts']);
     });
 
-    it('treats a re-created path as new', () => {
+    it('remembers known paths, so a file that comes back is not new', () => {
+      // Branch switch away and back, git stash/pop, or a regenerate-on-build tool.
       const state = run(
-        ['a.ts'],
-        { type: 'deleted', path: 'a.ts' },
-        { type: 'created', path: 'a.ts' },
+        ['docs/x.md'],
+        { type: 'created', path: 'seen.ts' },
+        { type: 'visited', path: 'seen.ts' },
+        { type: 'deleted', paths: ['docs/x.md', 'seen.ts'] },
+        { type: 'created', path: 'docs/x.md' },
+        { type: 'created', path: 'seen.ts' },
       );
-      expect(sorted(state.pending)).toEqual(['a.ts']);
+      expect(state.pending.size).toBe(0);
+    });
+
+    it('lists a re-created file that was never opened', () => {
+      const state = run(
+        [],
+        { type: 'created', path: 'p.ts' },
+        { type: 'deleted', paths: ['p.ts'] },
+        { type: 'created', path: 'p.ts' },
+      );
+      expect(sorted(state.pending)).toEqual(['p.ts']);
+    });
+
+    it('never touches the baseline set, so deletes stay cheap in large repositories', () => {
+      const state = run(['a.ts', 'b.ts'], { type: 'created', path: 'p.ts' });
+      const next = reduce(state, { type: 'deleted', paths: ['a.ts', 'p.ts', 'unknown/dir'] });
+      expect(next.baseline).toBe(state.baseline);
+    });
+
+    it('returns the same object when no pending row is affected', () => {
+      const state = run(['a.ts']);
+      expect(reduce(state, { type: 'deleted', paths: ['a.ts'] })).toBe(state);
     });
   });
 
@@ -167,14 +195,16 @@ describe('reduce', () => {
   });
 
   describe('reconciled', () => {
-    it('lists files added while VS Code was closed and drops missing ones', () => {
+    it('lists files added while VS Code was closed and drops missing rows', () => {
       const state = run(
         ['a.ts', 'gone.ts'],
         { type: 'created', path: 'p.ts' },
+        { type: 'created', path: 'vanished.ts' },
         { type: 'reconciled', present: ['a.ts', 'p.ts', 'offline.ts'] },
       );
-      expect(sorted(state.baseline)).toEqual(['a.ts']);
       expect(sorted(state.pending)).toEqual(['offline.ts', 'p.ts']);
+      // Known paths are remembered even while absent.
+      expect(state.baseline.has('gone.ts')).toBe(true);
     });
 
     it('keeps opened status for files that still exist', () => {
@@ -199,7 +229,7 @@ describe('reduce', () => {
       expect(sorted(state.baseline)).toEqual(['a.ts', 'vendor/lib.js', 'vendor/other.js']);
     });
 
-    it('drops tracked paths that became excluded', () => {
+    it('drops pending rows that became excluded', () => {
       const state = run(
         [],
         { type: 'created', path: 'notes/handoff.md' },
@@ -219,10 +249,15 @@ describe('reduce', () => {
       expect(visited.baseline).toBe(start.baseline);
     });
 
-    it('deletes a single file without scanning for descendants', () => {
-      const state = run(['a.ts', 'a.ts.bak']);
-      const next = reduce(state, { type: 'deleted', path: 'a.ts' });
-      expect(sorted(next.baseline)).toEqual(['a.ts.bak']);
+    it('handles a burst of 10k deletes against a 100k baseline quickly', () => {
+      const big = Array.from({ length: 100_000 }, (_, i) => `src/f${i}.ts`);
+      const state = run(big, { type: 'created', path: 'dist/new.js' });
+      const doomed = Array.from({ length: 10_000 }, (_, i) => `dist/chunk${i}.js`);
+      const started = performance.now();
+      const next = reduce(state, { type: 'deleted', paths: [...doomed, 'dist'] });
+      expect(performance.now() - started).toBeLessThan(200);
+      expect(next.pending.size).toBe(0);
+      expect(next.baseline).toBe(state.baseline);
     });
   });
 

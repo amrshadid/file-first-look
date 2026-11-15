@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { createPathFilter } from '../../src/core';
+import { ALWAYS_EXCLUDED, createPathFilter } from '../../src/core';
+
+const VCS = ALWAYS_EXCLUDED.join(',');
 
 describe('createPathFilter', () => {
   const filter = createPathFilter(['**/node_modules/**', '**/.cache/**', '**/*.log', ' ']);
@@ -24,13 +26,24 @@ describe('createPathFilter', () => {
   });
 
   it('combines globs for findFiles and ignores blank entries', () => {
-    expect(filter.combinedExcludeGlob).toBe('{**/node_modules/**,**/.cache/**,**/*.log}');
-    expect(createPathFilter(['**/dist/**']).combinedExcludeGlob).toBe('**/dist/**');
+    expect(filter.combinedExcludeGlob).toBe(`{${VCS},**/node_modules/**,**/.cache/**,**/*.log}`);
   });
 
-  it('includes everything when there are no exclusions', () => {
-    const open = createPathFilter([]);
-    expect(open.isIncluded('node_modules/a.js')).toBe(true);
-    expect(open.combinedExcludeGlob).toBeUndefined();
+  it('leaves globs with their own braces out of the combined glob but still applies them', () => {
+    const braces = createPathFilter(['**/*.{log,tmp}', '**/dist/**']);
+    expect(braces.combinedExcludeGlob).toBe(`{${VCS},**/dist/**}`);
+    expect(braces.isIncluded('a/run.tmp')).toBe(false);
+  });
+
+  it('always excludes version-control folders, even with a custom list', () => {
+    const custom = createPathFilter(['**/*.snap']);
+    expect(custom.isIncluded('.git/FETCH_HEAD')).toBe(false);
+    expect(custom.isIncluded('sub/.git/refs/heads/main')).toBe(false);
+    expect(custom.isIncluded('.hg/store/x')).toBe(false);
+    expect(custom.isIncluded('node_modules/a.js')).toBe(true);
+  });
+
+  it('does not duplicate globs the user also lists', () => {
+    expect(createPathFilter(['**/.git/**']).combinedExcludeGlob).toBe(`{${VCS}}`);
   });
 });

@@ -1,6 +1,6 @@
 /** Public surface of the pure core. Adapters import from here only. */
-export { createPathFilter, type PathFilter } from './pathFilter';
-export { isSameOrDescendant, rebase, toRelPath, type RelPath } from './paths';
+export { ALWAYS_EXCLUDED, createPathFilter, type PathFilter } from './pathFilter';
+export { ancestorsOf, isSameOrDescendant, rebase, toRelPath, type RelPath } from './paths';
 export {
   deserialize,
   serialize,

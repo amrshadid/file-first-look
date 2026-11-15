@@ -12,25 +12,40 @@ export interface PathFilter {
   /** True when the path is in scope (not matched by any exclusion). */
   isIncluded(path: RelPath): boolean;
   /**
-   * The exclusions combined into one glob for `workspace.findFiles`, or
-   * `undefined` when there are none.
+   * A single glob for `workspace.findFiles` so excluded trees are never walked,
+   * or `undefined` when there is nothing safe to combine. It is an optimization
+   * only: results are always re-checked with {@link isIncluded}.
    */
   readonly combinedExcludeGlob: string | undefined;
 }
 
+/**
+ * Version-control internals are never meant to be read and are rewritten
+ * constantly (`.git/FETCH_HEAD`, refs, locks). They are always excluded, even
+ * when a user replaces the `exclude` setting, because VS Code array settings
+ * replace the default rather than merge with it.
+ */
+export const ALWAYS_EXCLUDED: readonly string[] = ['**/.git/**', '**/.hg/**', '**/.svn/**'];
+
 /** Builds a {@link PathFilter} from user-facing exclusion globs. */
 export function createPathFilter(excludeGlobs: readonly string[]): PathFilter {
-  const globs = excludeGlobs.map((glob) => glob.trim()).filter((glob) => glob.length > 0);
-
-  if (globs.length === 0) {
-    return { isIncluded: () => true, combinedExcludeGlob: undefined };
-  }
+  const globs = [
+    ...new Set([...ALWAYS_EXCLUDED, ...excludeGlobs.map((glob) => glob.trim())]),
+  ].filter((glob) => glob.length > 0);
 
   // `dot: true` so patterns like `**/.cache/**` behave as users expect.
   const isExcluded = picomatch(globs, { dot: true });
 
-  return {
-    isIncluded: (path) => !isExcluded(path),
-    combinedExcludeGlob: globs.length === 1 ? globs[0] : `{${globs.join(',')}}`,
-  };
+  // VS Code globs don't support nested braces, so globs that contain their own
+  // `{…}` group are left out of the combined glob. They still apply through
+  // `isIncluded`.
+  const combinable = globs.filter((glob) => !glob.includes('{'));
+  const combinedExcludeGlob =
+    combinable.length === 0
+      ? undefined
+      : combinable.length === 1
+        ? combinable[0]
+        : `{${combinable.join(',')}}`;
+
+  return { isIncluded: (path) => !isExcluded(path), combinedExcludeGlob };
 }

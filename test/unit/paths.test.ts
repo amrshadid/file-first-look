@@ -1,16 +1,28 @@
 import { describe, expect, it } from 'vitest';
 
-import { isSameOrDescendant, rebase, toRelPath } from '../../src/core';
+import { ancestorsOf, isSameOrDescendant, rebase, toRelPath } from '../../src/core';
 
 describe('toRelPath', () => {
   it.each([
-    ['src\\app.ts', 'src/app.ts'],
     ['./src/app.ts', 'src/app.ts'],
     ['/src/app.ts', 'src/app.ts'],
     ['src/dir/', 'src/dir'],
     ['app.ts', 'app.ts'],
   ])('normalizes %s to %s', (input, expected) => {
     expect(toRelPath(input)).toBe(expected);
+  });
+});
+
+describe('toRelPath backslashes', () => {
+  it('keeps backslashes, which are legal in POSIX file names', () => {
+    expect(toRelPath('a\\b.txt')).toBe('a\\b.txt');
+  });
+});
+
+describe('ancestorsOf', () => {
+  it('lists parent folders nearest first', () => {
+    expect(ancestorsOf('a/b/c.ts')).toEqual(['a/b', 'a']);
+    expect(ancestorsOf('top.ts')).toEqual([]);
   });
 });
 
