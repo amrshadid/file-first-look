@@ -117,7 +117,10 @@ suite('File First Look', () => {
     });
 
     test('requires the file to stay in view for the minimum view time', async () => {
+      // The fixture sets 0 so other tests run fast. Restore that exact value
+      // afterwards: updating to `undefined` would delete it from the file.
       const config = vscode.workspace.getConfiguration('fileFirstLook');
+      const previous = config.inspect<number>('minimumViewTime')?.workspaceValue;
       await config.update('minimumViewTime', 1500, vscode.ConfigurationTarget.Workspace);
       try {
         await writeExternally('scratch/glance.ts');
@@ -135,7 +138,7 @@ suite('File First Look', () => {
         assert.equal(isPending('scratch/glance.ts'), true, 'a brief glance does not count');
         assert.equal(isOpened('scratch/stay.ts'), true, 'staying in view counts');
       } finally {
-        await config.update('minimumViewTime', undefined, vscode.ConfigurationTarget.Workspace);
+        await config.update('minimumViewTime', previous, vscode.ConfigurationTarget.Workspace);
       }
     });
 

@@ -4,3 +4,8 @@ coverage/
 .vscode-test/
 package-lock.json
 CHANGELOG.md
+
+# Hidden folders are tool or local state, except the ones we maintain.
+/.*/
+!/.github/
+!/.vscode/
