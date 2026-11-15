@@ -1,0 +1,2 @@
+# Used by the integration tests to check that git-ignored files are never listed.
+ignored-by-git/
