@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest an improvement.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        File First Look deliberately does one thing: it shows new files you haven't opened yet.
+        Please read docs/design-principles.md first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you facing?
+      description: Describe the situation, not the solution. Which files did you miss, or which rows were noise?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?

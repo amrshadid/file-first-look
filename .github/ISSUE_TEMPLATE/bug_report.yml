@@ -1,0 +1,34 @@
+name: Bug report
+description: Something doesn't work as documented.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start tracking
+        2. Run an agent that creates files in src/
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      placeholder: File First Look 0.1.0, VS Code 1.10x, macOS 15
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Output log
+      description: Paste the "File First Look" output channel (View → Output).
+      render: text
