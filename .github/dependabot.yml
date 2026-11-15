@@ -7,6 +7,17 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+    ignore:
+      # Must match the minimum VS Code version in `engines.vscode`. Newer types
+      # would allow APIs that don't exist on older VS Code, and vsce refuses to
+      # package when they don't match. Bump together with `engines` by hand.
+      - dependency-name: '@types/vscode'
+      # VS Code's extension host runs Node 22; the types should describe it.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      # typescript-eslint supports TypeScript < 6.1. Revisit when it supports 7.
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
     commit-message:
       prefix: build
       include: scope
