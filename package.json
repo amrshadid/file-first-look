@@ -1,0 +1,257 @@
+{
+  "name": "file-first-look",
+  "displayName": "File First Look",
+  "description": "See which new files in your workspace you haven't opened yet \u2014 built for keeping a human in the loop with coding agents.",
+  "version": "0.0.1",
+  "publisher": "file-first-look",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amrshadid/file-first-look.git"
+  },
+  "bugs": {
+    "url": "https://github.com/amrshadid/file-first-look/issues"
+  },
+  "keywords": [
+    "agents",
+    "ai",
+    "review",
+    "unopened",
+    "new files",
+    "human in the loop"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#f5f4ef",
+    "theme": "light"
+  },
+  "engines": {
+    "vscode": "^1.100.0",
+    "node": ">=22"
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "fileFirstLook.startTracking",
+        "title": "Start Tracking",
+        "category": "File First Look",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "fileFirstLook.stopTracking",
+        "title": "Stop Tracking",
+        "category": "File First Look",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "fileFirstLook.refresh",
+        "title": "Refresh",
+        "category": "File First Look",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "fileFirstLook.openFile",
+        "title": "Open File",
+        "category": "File First Look"
+      },
+      {
+        "command": "fileFirstLook.markOpened",
+        "title": "Mark as Opened",
+        "category": "File First Look",
+        "icon": "$(check)"
+      },
+      {
+        "command": "fileFirstLook.markAllOpened",
+        "title": "Mark All as Opened",
+        "category": "File First Look",
+        "icon": "$(check-all)"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "fileFirstLook.unopenedFiles",
+          "name": "Unopened Files",
+          "icon": "$(eye)",
+          "contextualTitle": "File First Look"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "fileFirstLook.unopenedFiles",
+        "contents": "See which new files you haven't opened yet.\nWhen you start, every file that already exists counts as seen, so the list starts empty, even in a project with thousands of files. Only files created after this moment, by you or by your agents, will appear.\n[Start Tracking](command:fileFirstLook.startTracking)",
+        "when": "fileFirstLook.supported && !fileFirstLook.tracking"
+      },
+      {
+        "view": "fileFirstLook.unopenedFiles",
+        "contents": "You're all caught up. New files you haven't opened will appear here.",
+        "when": "fileFirstLook.supported && fileFirstLook.tracking"
+      },
+      {
+        "view": "fileFirstLook.unopenedFiles",
+        "contents": "File First Look currently supports a single local workspace folder. Open one folder to start tracking.",
+        "when": "!fileFirstLook.supported"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "fileFirstLook.refresh",
+          "when": "view == fileFirstLook.unopenedFiles && fileFirstLook.tracking",
+          "group": "navigation@1"
+        },
+        {
+          "command": "fileFirstLook.markAllOpened",
+          "when": "view == fileFirstLook.unopenedFiles && fileFirstLook.tracking",
+          "group": "navigation@2"
+        },
+        {
+          "command": "fileFirstLook.stopTracking",
+          "when": "view == fileFirstLook.unopenedFiles && fileFirstLook.tracking",
+          "group": "overflow@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "fileFirstLook.markOpened",
+          "when": "view == fileFirstLook.unopenedFiles && viewItem == unopenedFile",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "fileFirstLook.openFile",
+          "when": "false"
+        },
+        {
+          "command": "fileFirstLook.markOpened",
+          "when": "false"
+        },
+        {
+          "command": "fileFirstLook.startTracking",
+          "when": "fileFirstLook.supported && !fileFirstLook.tracking"
+        },
+        {
+          "command": "fileFirstLook.stopTracking",
+          "when": "fileFirstLook.tracking"
+        },
+        {
+          "command": "fileFirstLook.refresh",
+          "when": "fileFirstLook.tracking"
+        },
+        {
+          "command": "fileFirstLook.markAllOpened",
+          "when": "fileFirstLook.tracking"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "File First Look",
+      "properties": {
+        "fileFirstLook.exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/.git/**",
+            "**/node_modules/**",
+            "**/bower_components/**",
+            "**/dist/**",
+            "**/out/**",
+            "**/build/**",
+            "**/target/**",
+            "**/coverage/**",
+            "**/.next/**",
+            "**/.nuxt/**",
+            "**/.turbo/**",
+            "**/.cache/**",
+            "**/.venv/**",
+            "**/venv/**",
+            "**/__pycache__/**",
+            "**/.pytest_cache/**",
+            "**/.mypy_cache/**",
+            "**/.gradle/**",
+            "**/.idea/**",
+            "**/.vscode-test/**",
+            "**/.DS_Store",
+            "**/*.log",
+            "**/*.pyc"
+          ],
+          "markdownDescription": "Glob patterns (relative to the workspace folder) for paths that are never listed. Applied to both the initial scan and live file events. Changing this list never marks existing files as new.",
+          "scope": "resource"
+        },
+        "fileFirstLook.respectGitIgnore": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Never list files ignored by git (`.gitignore`, `.git/info/exclude` and your global excludes). Uses `git ls-files`, which is also the fastest way to scan large repositories. Has no effect outside a git repository.",
+          "scope": "resource"
+        },
+        "fileFirstLook.minimumViewTime": {
+          "type": "integer",
+          "default": 1000,
+          "minimum": 0,
+          "maximum": 10000,
+          "markdownDescription": "How long (in milliseconds) a file must stay the active editor in a focused window before it counts as opened. Prevents rapid tab-cycling or extensions that auto-open files from clearing entries you never actually looked at. Set to `0` to count immediately.",
+          "scope": "resource"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "build:prod": "node esbuild.mjs --production",
+    "watch": "node esbuild.mjs --watch",
+    "compile-tests": "tsc -p test/integration/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/integration/tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write --ignore-path .gitignore --ignore-path .prettierignore --ignore-path .git/info/exclude .",
+    "format:check": "prettier --check --ignore-path .gitignore --ignore-path .prettierignore --ignore-path .git/info/exclude .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "npm run build && npm run compile-tests && vscode-test",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm run test",
+    "package": "vsce package --no-dependencies",
+    "vscode:prepublish": "npm run build:prod"
+  },
+  "dependencies": {
+    "picomatch": "4.0.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/mocha": "10.0.10",
+    "@types/node": "22.20.5",
+    "@types/picomatch": "4.0.3",
+    "@types/vscode": "1.100.0",
+    "@vitest/coverage-v8": "4.1.12",
+    "@vscode/test-cli": "0.0.15",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.1.1",
+    "esbuild": "0.28.2",
+    "eslint": "10.15.0",
+    "eslint-config-prettier": "10.1.8",
+    "prettier": "3.10.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.2",
+    "vitest": "4.1.12"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
