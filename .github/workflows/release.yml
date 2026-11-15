@@ -34,19 +34,26 @@ jobs:
       - run: xvfb-run -a npm run test:integration
       - run: npm run package
 
+      # Secrets can't be tested in `if:` directly, so each step checks its token.
       - name: Publish to the VS Code Marketplace
-        if: ${{ env.VSCE_PAT != '' }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx vsce publish --packagePath ./*.vsix
+        run: |
+          if [ -z "${VSCE_PAT}" ]; then echo "VSCE_PAT not set: skipping."; exit 0; fi
+          npx vsce publish --packagePath ./*.vsix
 
       - name: Publish to Open VSX
-        if: ${{ env.OVSX_PAT != '' }}
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: npx ovsx publish ./*.vsix
+        run: |
+          if [ -z "${OVSX_PAT}" ]; then echo "OVSX_PAT not set: skipping."; exit 0; fi
+          npx ovsx publish ./*.vsix
 
+      # 0.x versions are pilot builds, so they are marked as pre-releases.
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" ./*.vsix --title "${GITHUB_REF_NAME}" --generate-notes
+        run: |
+          flags=()
+          case "${GITHUB_REF_NAME}" in v0.*) flags+=(--prerelease) ;; esac
+          gh release create "${GITHUB_REF_NAME}" ./*.vsix --title "${GITHUB_REF_NAME}" --generate-notes "${flags[@]}"

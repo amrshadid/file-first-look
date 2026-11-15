@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-15
+
+First pilot pre-release.
+
 ### Added
 
 - **Unopened Files** view in the Explorer, listing files created after tracking started that haven't been opened.
@@ -27,3 +31,6 @@ All notable changes to this project are documented here. The format follows
 
 - Deletes are batched and never touch the baseline, so large delete bursts stay fast in big repositories.
 - State is saved to crash-safe files, and the baseline is written only when it changes.
+
+[Unreleased]: https://github.com/amrshadid/file-first-look/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/amrshadid/file-first-look/releases/tag/v0.1.0
