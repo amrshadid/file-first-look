@@ -244,7 +244,7 @@
     "@types/node": "22.20.5",
     "@types/picomatch": "4.0.3",
     "@types/vscode": "1.100.0",
-    "@vitest/coverage-v8": "5.1.0",
+    "@vitest/coverage-v8": "5.1.1",
     "@vscode/test-cli": "0.0.15",
     "@vscode/test-electron": "3.1.0",
     "@vscode/vsce": "4.1.1",
@@ -254,8 +254,8 @@
     "ovsx": "1.4.0",
     "prettier": "3.10.1",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.72.2",
-    "vitest": "5.1.0"
+    "typescript-eslint": "8.73.0",
+    "vitest": "5.1.1"
   },
   "allowScripts": {
     "esbuild@0.28.2": true
